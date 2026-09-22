@@ -26,7 +26,6 @@ The commands were traced back through PowerShell to an interactive Windows sessi
 | `net localgroup administrators` | Enumerate members of the local Administrators group |
 
 ## Process Ancestry
-## Process Ancestry
 
 Process creation telemetry was analyzed using Sysmon Event ID 1. `ProcessGuid` and `ParentProcessGuid` were used to reconstruct the process lineage rather than relying only on process names.
 
@@ -41,10 +40,6 @@ explorer.exe
     ├── net.exe user
     └── net.exe localgroup administrators
 ```
-
-
-Then we move to **Investigation Queries**, where you'll write the KQL yourself.
-    
 ## Investigation Queries
 ### Query 1 — Discovery Process Identification
 
@@ -69,7 +64,6 @@ Event
 ```
 
 ## Correlated Telemetry
-## Correlated Telemetry
 
 After identifying the discovery activity and reconstructing the process ancestry, additional Sysmon and Windows telemetry was reviewed to determine whether the PowerShell activity was associated with suspicious follow-on behavior.
 
@@ -92,7 +86,7 @@ The observed commands were mapped to the MITRE ATT&CK Discovery tactic based on 
 | `ipconfig.exe` | T1016 — System Network Configuration Discovery |
 | `net user` | T1087.001 — Account Discovery: Local Account |
 | `net localgroup administrators` | T1069.001 — Permission Groups Discovery: Local Groups |
-## Analyst Assessment
+
 ## Analyst Assessment
 
 The investigation began by reviewing activity surrounding the discovery-command burst, identifying the user and executed commands, and examining their `ProcessGuid` and `ParentProcessGuid` values. Process ancestry was reconstructed using Sysmon process creation telemetry to determine where the discovery commands originated.
@@ -101,7 +95,6 @@ The burst warranted investigation because multiple system and user discovery com
 
 Based on the process ancestry, surrounding telemetry, and absence of evidence indicating malicious follow-on activity, the case was classified as **benign**.
 
-## Lessons Learned
 ## Lessons Learned
 
 - **Process ancestry provides critical context.** I learned that identifying a suspicious command is only the beginning of an investigation. Using `ProcessGuid` and `ParentProcessGuid` to reconstruct the process ancestry helps determine where a process originated and what other activity is related to it.
