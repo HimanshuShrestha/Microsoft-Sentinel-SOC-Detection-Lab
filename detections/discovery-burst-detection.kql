@@ -3,13 +3,13 @@
 // by the same user on the same endpoint within a two-minute window.
 // Data Source: Sysmon Event ID 1
 // Platform: Microsoft Sentinel / Log Analytics
+// Note: The detection uses a fixed 2-minute bin and counts distinct
+// executable images. See README for documented limitations and
+// future improvements.
 
 Event
 | where EventID == 1
-| where TimeGenerated between (
-    datetime(2026-09-22 00:00:00) ..
-    datetime(2026-09-24 00:00:00)
-)
+| where TimeGenerated > ago(1h)
 | extend Parse = parse_xml(EventData)
 | mv-expand Expand = Parse.DataItem.EventData.Data
 | extend Data = tostring(Expand["@Name"]),
