@@ -1,0 +1,36 @@
+// Discovery Burst Detection
+// Purpose: Detect multiple distinct discovery utilities executed
+// by the same user on the same endpoint within a two-minute window.
+// Data Source: Sysmon Event ID 1
+// Platform: Microsoft Sentinel / Log Analytics
+
+Event
+| where EventID == 1
+| where TimeGenerated between (
+    datetime(2026-09-22 00:00:00) ..
+    datetime(2026-09-24 00:00:00)
+)
+| extend Parse = parse_xml(EventData)
+| mv-expand Expand = Parse.DataItem.EventData.Data
+| extend Data = tostring(Expand["@Name"]),
+         Value = tostring(Expand["#text"])
+| summarize DataValue = make_bag(bag_pack(Data, Value))
+    by TimeGenerated, Computer
+| evaluate bag_unpack(DataValue)
+| where Image endswith @"\whoami.exe"
+    or Image endswith @"\hostname.exe"
+    or Image endswith @"\ipconfig.exe"
+    or (
+        Image endswith @"\net.exe"
+        and (
+            CommandLine endswith "user"
+            or CommandLine endswith "localgroup administrators"
+        )
+    )
+| summarize
+    DiscoveryCount = dcount(Image),
+    DiscoveryTools = make_set(Image),
+    DiscoveryCommands = make_set(CommandLine)
+    by bin(TimeGenerated, 2m), Computer, User
+| where DiscoveryCount >= 3
+| sort by TimeGenerated asc
