@@ -22,7 +22,7 @@ The commands were traced back through PowerShell to an interactive Windows sessi
 | `whoami.exe` | Identify the current user |
 | `hostname.exe` | Identify the system hostname |
 | `ipconfig.exe` | Discover network configuration |
-| `net user` | Enumerate local/domain user information |
+| `net user` | Enumerate user accounts on the system |
 | `net localgroup administrators` | Enumerate members of the local Administrators group |
 
 ## Process Ancestry
@@ -52,14 +52,14 @@ Event
 | extend ParseValue = parse_xml(EventData)
 | mv-expand Data = ParseValue.DataItem.EventData.Data
 | extend Field = tostring(Data["@Name"]), Value = tostring(Data["#text"])
-| summarize Events = make_bag(bag_pack(Field, Value)) by TimeGenerated, EventID
+| summarize Events = make_bag(bag_pack(Field, Value)) by TimeGenerated, EventID, Computer
 | evaluate bag_unpack(Events)
 | where Image endswith @"\whoami.exe"
     or Image endswith @"\hostname.exe"
     or Image endswith @"\ipconfig.exe"
     or Image endswith @"\net.exe"
     or Image endswith @"\net1.exe"
-| project TimeGenerated, User, Image, CommandLine, ParentImage, ProcessGuid, ParentProcessGuid
+| project TimeGenerated, Computer, User, Image, CommandLine, ParentImage, ProcessGuid, ParentProcessGuid
 | sort by TimeGenerated asc
 ```
 
@@ -93,7 +93,7 @@ The investigation began by reviewing activity surrounding the discovery-command 
 
 The burst warranted investigation because multiple system and user discovery commands executed within a short period can also be observed during post-compromise reconnaissance. Further analysis of associated network connections, file creation, registry modifications, process access, and PowerShell telemetry did not identify suspicious follow-on behavior. The activity also occurred within an interactive user session and the process ancestry was consistent with user-initiated PowerShell activity.
 
-Based on the process ancestry, surrounding telemetry, and absence of evidence indicating malicious follow-on activity, the case was classified as **benign**.
+Based on the process ancestry, surrounding telemetry, and known provenance of the activity as part of the controlled lab simulation, the case was classified as Benign / Expected Test Activity. The additional telemetry review did not identify malicious follow-on behavior that contradicted that assessment.
 
 ## Lessons Learned
 
