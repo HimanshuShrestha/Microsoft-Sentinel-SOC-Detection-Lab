@@ -4,27 +4,36 @@
 This project simulates a SOC investigation workflow using Microsoft Sentinel in a controlled Windows 11 lab environment. I generated controlled system and account discovery activity on the endpoint and collected Sysmon telemetry in Microsoft Sentinel for detection and investigation. I developed and validated KQL detection logic to identify bursts of discovery commands and used the resulting activity as the starting point for analyst triage. During the investigation, I examined multiple telemetry sources, including Sysmon Event IDs 1, 3, 7, 11, and 13, and reconstructed process ancestry using ProcessGuid and ParentProcessGuid. I then correlated network, file, registry, and process activity surrounding the detection to determine whether supporting evidence indicated malicious behavior and document an analyst verdict.
 
 ## Lab Architecture
-SOC-WIN11
-    │
-    ├── Azure Arc
-    │   └── Connects/manages the non-Azure endpoint in Azure
-    │
-    └── Sysmon
-         │
-         │ generates Windows/Sysmon telemetry
-         ▼
-        AMA
-         │
-         │ follows Data Collection Rules (DCR)
-         ▼
+## Lab Architecture
+
+```text
+SOC-WIN11 (Windows 11 Endpoint)
+│
+├── Azure Arc
+│   └── Connects and manages the endpoint in Azure
+│
+└── Sysmon
+     │
+     │  Generates endpoint telemetry
+     ▼
+Azure Monitor Agent (AMA)
+     │
+     │  Collects telemetry according to DCRs
+     ▼
+Data Collection Rules (DCR)
+     │
+     │  Defines what telemetry is collected
+     ▼
 Log Analytics Workspace
-         │
-         ▼
+     │
+     │  Stores and enables querying of telemetry
+     ▼
 Microsoft Sentinel
-         │
-         ├── KQL Detection
-         ├── Alerts / Incidents
-         └── Investigation
+     │
+     ├── KQL Detection
+     ├── Alert / Incident Triage
+     └── Investigation
+```
          
 ## Core Technologies
 | Technology | How you used it |
