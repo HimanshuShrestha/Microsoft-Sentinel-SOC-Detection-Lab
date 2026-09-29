@@ -1,9 +1,19 @@
 # Microsoft Sentinel SOC Detection Lab
 
 ## Project Overview
-This project simulates a SOC investigation workflow using Microsoft Sentinel in a controlled Windows 11 lab environment. I generated controlled system and account discovery activity on the endpoint and collected Sysmon telemetry in Microsoft Sentinel for detection and investigation. I developed and validated KQL detection logic to identify bursts of discovery commands and used the resulting activity as the starting point for analyst triage. During the investigation, I examined multiple telemetry sources, including Sysmon Event IDs 1, 3, 7, 11, and 13, and reconstructed process ancestry using ProcessGuid and ParentProcessGuid. I then correlated network, file, registry, and process activity surrounding the detection to determine whether supporting evidence indicated malicious behavior and document an analyst verdict.
 
-## Lab Architecture
+This project demonstrates a SOC detection and investigation workflow using Microsoft Sentinel in a controlled Windows 11 lab environment. I generated controlled Windows discovery activity, collected endpoint telemetry using Sysmon, and investigated the resulting activity in Microsoft Sentinel.
+
+I developed a KQL detection query to identify bursts of discovery utilities executed by the same user and endpoint within a short time window. During investigation, I used Sysmon process-creation telemetry to reconstruct process relationships with `ProcessGuid` and `ParentProcessGuid` and reviewed additional network, process-access, file, registry, PowerShell, and authentication telemetry for supporting evidence.
+
+The project focuses on the complete analyst workflow:
+
+**Generate activity → Detect → Triage → Reconstruct process ancestry → Correlate telemetry → Map to MITRE ATT&CK → Determine verdict**
+
+The investigation demonstrated an important SOC principle: discovery commands may justify investigation, but their presence alone does not establish malicious activity.
+
+---
+
 ## Lab Architecture
 
 ```text
@@ -14,37 +24,48 @@ SOC-WIN11 (Windows 11 Endpoint)
 │
 └── Sysmon
      │
-     │  Generates endpoint telemetry
+     │ Generates endpoint telemetry
      ▼
 Azure Monitor Agent (AMA)
      │
-     │  Collects telemetry according to DCRs
+     │ Collects telemetry according to DCRs
      ▼
 Data Collection Rules (DCR)
      │
-     │  Defines what telemetry is collected
+     │ Defines what telemetry is collected
      ▼
 Log Analytics Workspace
      │
-     │  Stores and enables querying of telemetry
+     │ Stores and enables querying of telemetry
      ▼
 Microsoft Sentinel
      │
-     ├── KQL Detection
-     ├── Alert / Incident Triage
+     ├── KQL Detection Queries
+     ├── Triage
      └── Investigation
 ```
-         
+
+Azure Arc provides management and onboarding capabilities for the Windows endpoint, while the telemetry pipeline uses the Azure Monitor Agent and Data Collection Rules to send configured events to the Log Analytics workspace used by Microsoft Sentinel.
+
+---
+
 ## Core Technologies
-| Technology | How you used it |
+
+| Technology | How It Was Used |
 |---|---|
-| **Microsoft Sentinel** | SIEM platform for detection, alert triage, log investigation, and incident analysis |
-| **Sysmon** | Endpoint telemetry for process creation, network connections, image loads, file creation, process access, and registry changes |
-| **Windows Security Events** | Windows authentication/security telemetry, including logon activity |
-| **KQL** | Queried telemetry, reconstructed activity, correlated events, and developed detection logic |
-| **MITRE ATT&CK** | Mapped observed discovery activity to corresponding adversary techniques |
+| **Microsoft Sentinel** | SIEM platform for detection queries, triage, log investigation, and analysis |
+| **Sysmon** | Endpoint telemetry for process creation, network connections, image loads, process access, file creation, and registry changes |
+| **Windows Security Events** | Authentication and logon context |
+| **PowerShell Script Block Logging** | Visibility into PowerShell script execution through Event ID 4104 |
+| **KQL** | Parsed telemetry, filtered events, reconstructed activity, correlated evidence, and developed detection logic |
+| **MITRE ATT&CK** | Mapped observed discovery behaviors to recognized adversary techniques |
+
+---
 
 ## Telemetry Sources
+
+The lab collected multiple telemetry sources. Not every event type contributed equally to every investigation.
+
 | Event | Telemetry |
 |---|---|
 | Sysmon 1 | Process creation |
@@ -56,101 +77,228 @@ Microsoft Sentinel
 | Windows 4624 | Successful account logon |
 | PowerShell 4104 | PowerShell script block content |
 
+Sysmon Event ID 1 provided the primary evidence for the discovery-burst investigation because it exposed process names, command lines, users, and process relationships. Other telemetry sources were reviewed as supporting context where applicable.
+
+---
+
 ## Detection Engineering
+
 ### Discovery Burst Detection
 
-I developed a KQL detection to identify potential discovery activity on the Windows endpoint. The detection uses Sysmon Event ID 1 process-creation telemetry and looks for multiple discovery utilities executed by the same user on the same endpoint within a two-minute window.
+I developed a KQL detection query to identify potential discovery activity using Sysmon Event ID 1 process-creation telemetry.
 
-The detection monitors utilities including `whoami.exe`, `hostname.exe`, `ipconfig.exe`, and discovery-related uses of `net.exe`. Because `net.exe` can perform many legitimate functions, its command-line arguments are inspected to identify specific discovery behavior such as `net user` and `net localgroup administrators`.
+The query searches for multiple discovery utilities executed by the same user on the same endpoint within a two-minute time window.
 
-The events are aggregated by computer, user, and two-minute time window. `dcount(Image)` is used to count distinct discovery utilities rather than total process executions, preventing repeated execution of a single utility from unnecessarily increasing the detection count. A burst is identified when three or more distinct discovery utilities are observed within the defined window.
+The detection monitors:
 
-### Detection Validation and Tuning
+- `whoami.exe`
+- `hostname.exe`
+- `ipconfig.exe`
+- discovery-related execution of `net.exe`
 
-During validation, the initial detection returned no results even though discovery activity was known to exist in the telemetry. Rather than lowering the detection threshold, I examined the query pipeline and raw Sysmon Event ID 1 telemetry to identify where events were being excluded.
+Because `net.exe` supports many legitimate functions, command-line arguments are inspected to identify discovery behavior such as:
 
-The investigation revealed that the initial `net.exe` command-line filter was too specific. The detection expected the literal string `net user`, while the actual Sysmon telemetry contained variations such as full executable paths and additional spacing. I adjusted the command-line matching based on the observed telemetry and reran the detection.
+- `net user`
+- `net localgroup administrators`
 
-After tuning, the detection successfully identified the controlled discovery bursts with three distinct discovery utilities occurring within the two-minute threshold.
+Events are aggregated by computer, user, and two-minute time bin. `dcount(Image)` counts distinct discovery executable images rather than total executions.
+
+A burst is returned when three or more distinct discovery utilities are observed within the defined window.
+
+### Detection Validation and False-Negative Troubleshooting
+
+During functional validation, the initial query returned no results even though controlled discovery activity was known to exist in the telemetry.
+
+Instead of immediately changing the threshold, I examined the query pipeline and raw Sysmon Event ID 1 events to determine where the expected activity was being excluded.
+
+The issue was traced to an overly specific `net.exe` command-line filter. The original logic expected a literal command-line pattern such as `net user`, while the actual Sysmon telemetry contained executable paths and formatting differences.
+
+The filter was corrected based on the observed telemetry and the query was rerun.
+
+After the correction, the KQL query successfully identified the controlled discovery burst.
+
+This testing demonstrated functional validation and false-negative troubleshooting of the query. More extensive positive, negative, and boundary testing would be required before describing the detection as production-ready.
+
 ### Detection Result
 
-<img width="940" height="437" alt="image" src="https://github.com/user-attachments/assets/430a145a-0a3e-45be-9d20-74824c03ff10" />
+<img width="940" height="437" alt="Discovery burst detection result" src="https://github.com/user-attachments/assets/430a145a-0a3e-45be-9d20-74824c03ff10" />
 
+> **Implementation note:** The discovery logic documented in this repository was executed and validated as a KQL detection query against Microsoft Sentinel telemetry. The repository does not represent the query as a production-deployed analytics rule.
 
-## Controlled Attack Simulation
+---
 
-To generate realistic telemetry for detection and investigation, I performed controlled discovery activity on the Windows 11 endpoint. The simulation represented reconnaissance that could occur after an attacker gains access to a system and begins gathering information about the compromised environment.
+## Controlled Discovery Simulation
 
-The following discovery commands were executed:
+To generate telemetry for detection and investigation, I intentionally executed Windows discovery commands on the controlled Windows 11 endpoint.
+
+The activity represented behaviors that could be observed when a user, administrator, or attacker gathers information about a system.
+
+Commands used during controlled testing included:
 
 | Command | Discovery Purpose |
 |---|---|
 | `whoami` | Identify the currently logged-in user |
-| `whoami /priv` | Enumerate privileges assigned to the current user's access token |
-| `whoami /groups` | Enumerate the current user's group memberships |
-| `ipconfig` | Examine the endpoint's network configuration |
+| `whoami /priv` | Enumerate privileges assigned to the current access token |
+| `whoami /groups` | Enumerate group memberships |
+| `ipconfig` | Examine endpoint network configuration |
 | `net user` | Enumerate local user accounts |
 | `net localgroup administrators` | Identify members of the local Administrators group |
 
-Multiple discovery commands were intentionally executed within a short period rather than relying on a single command. This created a behavioral pattern representing how an attacker may gather several types of information about a compromised endpoint, including user identity, privileges, group memberships, network configuration, available accounts, and administrator membership.
+Multiple discovery commands were intentionally executed within short periods to create behavioral patterns for detection and investigation rather than relying on a single command.
 
-The generated activity produced Sysmon process-creation telemetry that was ingested into Microsoft Sentinel and used to validate the discovery-burst detection and practice the subsequent SOC investigation workflow.
+The generated activity produced Sysmon process-creation telemetry that was ingested into Microsoft Sentinel and used for KQL detection development and SOC investigation practice.
+
+---
 
 ## SOC Investigation
 
 ### Initial Triage
-After the discovery-burst activity was identified, I began triage by reviewing the detection timestamp, affected endpoint, user, and the command lines associated with the discovery activity. This established the initial scope of the investigation and identified the processes requiring further analysis.
+
+One investigated discovery burst contained four discovery commands executed within approximately **18 seconds**:
+
+```text
+whoami
+   ↓ ~4 seconds
+net user
+   ↓ ~10 seconds
+ipconfig
+   ↓ ~4 seconds
+net localgroup administrators
+```
+
+The rapid sequence warranted investigation because multiple discovery utilities executed in close succession can occur during post-compromise reconnaissance.
+
+Timing alone, however, was not treated as proof that the processes were related or malicious.
 
 ### Process Ancestry Analysis
-I examined the `Image`, `ParentImage`, `ProcessGuid`, and `ParentProcessGuid` fields from Sysmon Event ID 1 telemetry to reconstruct the process ancestry associated with the discovery commands. Process GUID relationships were used to determine which processes initiated the observed discovery activity rather than relying only on temporal proximity between events.
 
-The analysis showed the relationship between the interactive shell and the discovery utilities executed during the controlled simulation, allowing the activity to be reconstructed as a process chain.
+Sysmon Event ID 1 telemetry was used to examine:
+
+- `Image`
+- `CommandLine`
+- `User`
+- `ParentImage`
+- `ProcessGuid`
+- `ParentProcessGuid`
+
+All four discovery processes shared the same `ParentProcessGuid`, and their `ParentImage` was:
+
+```text
+C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe
+```
+
+This provided direct process-level correlation showing that the discovery commands originated from the same PowerShell parent process.
+
+The reconstructed activity was:
+
+```text
+explorer.exe
+└── powershell.exe
+    ├── whoami.exe
+    ├── net.exe user
+    ├── ipconfig.exe
+    └── net.exe localgroup administrators
+```
+
+The common PowerShell parent was stronger correlation evidence than temporal proximity alone.
+
 ### Supporting Telemetry
-Process ancestry alone was not considered sufficient to determine whether the discovery activity represented malicious behavior. After reconstructing the process chain, I examined additional endpoint telemetry for activity that could support or increase the initial suspicion.
 
-The investigation included Sysmon Event ID 3 for network connections, Event ID 10 for process access, Event ID 11 for file creation, Event ID 13 for registry modifications, and additional Event ID 1 process-creation activity. PowerShell Script Block Logging (Event ID 4104) was also available to provide visibility into PowerShell activity.
+After reconstructing the discovery activity, additional telemetry was reviewed to determine whether supporting evidence increased suspicion.
 
-Events were evaluated using the affected endpoint, user, timestamps, process relationships, and event-specific fields. Temporal proximity was treated as investigative context rather than proof that two events were causally related.
+| Telemetry | Investigation Result |
+|---|---|
+| **Sysmon 3 — Network Connection** | No suspicious network connection attributable to the investigated PowerShell discovery activity was identified. A separate Defender connection was observed but was not attributed to the discovery process. |
+| **Sysmon 10 — Process Access** | Process-access activity was reviewed. No observed activity materially increased suspicion of the discovery sequence. |
+| **Sysmon 11 — File Create** | No relevant file creation was identified that could be confidently attributed to the discovery sequence. |
+| **Sysmon 13 — Registry Value Set** | BAM-related PowerShell registry activity was reviewed. No suspicious persistence-related modification attributable to the discovery activity was identified. |
+| **PowerShell 4104** | Available script-block telemetry was reviewed for additional PowerShell context. No script-block evidence materially increased suspicion of the investigated discovery sequence. |
+| **Windows 4624** | An interactive logon (`LogonType 2`) for `socanalyst` provided supporting user-session context. |
 
-### MITRE ATT&CK Mapping
+The absence of a supporting event was **not treated as proof of benign activity**. Conclusions were limited by the telemetry collected by the configured Sysmon rules and Data Collection Rules.
 
-The discovery activity was mapped to the MITRE ATT&CK framework to connect the observed Windows commands with recognized adversary discovery behaviors.
+During later telemetry validation, known test activity was successfully observed end-to-end for Sysmon Event ID 1, Sysmon Event ID 13, and PowerShell Event ID 4104. A previous controlled test also successfully generated Sysmon Event ID 11 telemetry. File-creation monitoring uses selective filtering, so the absence of Event ID 11 cannot be interpreted as proof that no file was created.
+
+---
+
+## MITRE ATT&CK Mapping
+
+The observed discovery behaviors were mapped to MITRE ATT&CK.
 
 | Activity | MITRE ATT&CK Technique |
 |---|---|
-| `whoami` / `whoami /priv` | System Owner/User Discovery (T1033) |
-| `ipconfig` | System Network Configuration Discovery (T1016) |
-| `net user` | Account Discovery: Local Account (T1087.001) |
-| `net localgroup administrators` | Permission Groups Discovery: Local Groups (T1069.001) |
+| `whoami` | T1033 — System Owner/User Discovery |
+| `ipconfig` | T1016 — System Network Configuration Discovery |
+| `net user` | T1087.001 — Account Discovery: Local Account |
+| `net localgroup administrators` | T1069.001 — Permission Groups Discovery: Local Groups |
 
-MITRE ATT&CK mapping provided additional context for understanding why the observed commands could be relevant during a SOC investigation. The presence of discovery techniques alone was not treated as proof of malicious activity; the surrounding telemetry and process relationships were also investigated.
+Additional controlled testing also included privilege and group discovery commands. MITRE ATT&CK mapping was used to explain why the observed behaviors could be relevant during a SOC investigation, not to establish that the activity was malicious.
 
-### Analyst Verdict
+---
+
+## Analyst Verdict
 
 **Verdict: Benign / Expected Test Activity**
 
-The discovery burst warranted investigation because several discovery commands were executed within a short period and represented behavior that could also occur during post-compromise reconnaissance.
+### Analyst Assessment
 
-The investigation began with Sysmon Event ID 1 process-creation telemetry and expanded into process ancestry analysis using `ProcessGuid`, `ParentProcessGuid`, `Image`, `ParentImage`, and command-line information. Additional telemetry was reviewed for network connections, process access, file creation, registry modifications, and PowerShell activity.
+The discovery burst warranted investigation because several native Windows discovery utilities executed within approximately 18 seconds from the same PowerShell parent process.
 
-The activity was ultimately classified as benign because it originated from the controlled lab simulation, and the investigation did not identify malicious follow-on behavior supporting a compromise. This investigation reinforced that discovery activity should be evaluated in context rather than classified as malicious based only on the execution of administrative or discovery commands.
+Process relationships established through `ProcessGuid` and `ParentProcessGuid` provided stronger correlation than timing alone.
+
+Supporting telemetry was reviewed for suspicious network communication, process access, file creation, registry modification, PowerShell activity, and authentication context. The available evidence did not identify follow-on behavior that materially increased suspicion.
+
+Based on the telemetry available to the analyst, the activity was assessed as **Benign / Expected Test Activity**.
+
+### Ground Truth
+
+After the analyst assessment, the conclusion was compared with the known ground truth of the lab.
+
+The discovery activity had been intentionally generated under the `SOC-WIN11\socanalyst` account as part of the controlled SOC exercise.
+
+Separating ground truth from the analyst assessment prevents the known origin of the test activity from becoming the primary justification for the verdict.
+
+### What Would Have Increased Suspicion?
+
+The case would have required further investigation or escalation if supporting evidence had included:
+
+- an unexpected or suspicious parent process;
+- encoded or obfuscated PowerShell;
+- suspicious external network communication associated with the process lineage;
+- unexpected file or payload creation;
+- registry modification consistent with persistence;
+- credential-access behavior;
+- an unexpected user or authentication context; or
+- additional suspicious activity correlated through process ancestry.
+
+---
 
 ## Key Findings and Lessons Learned
 
-- A burst of discovery commands can justify investigation but does not independently establish malicious activity.
-- Process ancestry provides stronger investigative context than relying only on events occurring close together in time.
-- `ProcessGuid` and `ParentProcessGuid` can be used to reconstruct relationships between processes and understand how activity was initiated.
-- Detection logic should be validated against actual telemetry rather than assumptions about how command-line data will appear.
-- Repeated execution of one discovery utility should not necessarily carry the same detection weight as several distinct discovery behaviors.
-- Supporting telemetry such as network connections, file creation, registry modifications, process access, and PowerShell logging can help determine whether suspicious discovery activity is followed by additional malicious behavior.
-- Detection engineering is iterative. The initial discovery-burst query produced a false negative because the `net.exe` command-line filter did not match the actual telemetry. Examining the raw events allowed the detection logic to be corrected and successfully validated.
+- A burst of discovery commands can justify investigation without independently establishing malicious activity.
+- Four commands occurring within approximately 18 seconds provided temporal correlation, while the shared `ParentProcessGuid` established a stronger process relationship.
+- `ProcessGuid` and `ParentProcessGuid` are valuable for reconstructing process ancestry and correlating related endpoint activity.
+- Detection logic should be tested against actual telemetry rather than assumptions about how command-line fields will appear.
+- The initial KQL query produced a false negative because the `net.exe` filter did not match the actual telemetry. Examining raw events allowed the logic to be corrected.
+- Negative evidence must be interpreted in the context of telemetry coverage. The absence of an event does not prove that an action did not occur.
+- Ground truth should be separated from analyst reasoning when evaluating controlled security simulations.
+- MITRE ATT&CK techniques describe behavior; they do not by themselves establish malicious intent.
+
+---
 
 ## Future Improvements
 
-The current discovery-burst detection counts distinct executable images using `dcount(Image)`. This approach has a limitation because one executable can represent multiple discovery behaviors. For example, `net user` and `net localgroup administrators` both execute through `net.exe`, while `whoami` and `whoami /priv` both execute through `whoami.exe`.
+The current discovery-burst detection counts distinct executable images using `dcount(Image)`. This creates a limitation because one executable can represent multiple discovery behaviors.
 
-A future version of the detection could normalize command lines into behavioral categories before aggregation. This would allow distinct discovery behaviors to be counted rather than only distinct executable images.
+For example:
 
-The current detection also uses fixed two-minute time bins. Activity occurring near the boundary between two bins could be separated even when the commands were executed close together. A future version could evaluate a rolling time window or another correlation strategy to reduce this limitation.
+- `net user` and `net localgroup administrators` both execute through `net.exe`.
+- `whoami` and `whoami /priv` both execute through `whoami.exe`.
 
-Additional improvements could include correlating a discovery burst with subsequent suspicious network connections, file creation, registry modifications, or other endpoint activity associated with the same user, endpoint, or process ancestry. This would provide higher-confidence behavioral detection while reducing reliance on discovery commands alone.
+A future version could normalize command lines into behavioral categories before aggregation. This would allow the detection to count distinct discovery behaviors rather than only distinct executable images.
+
+The current detection also uses fixed two-minute time bins. Activity occurring near the boundary between two bins could be separated even when the commands occurred close together. A future version could evaluate a rolling time window or another correlation strategy.
+
+Additional improvements could correlate discovery activity with subsequent suspicious network connections, file creation, registry modifications, PowerShell activity, or other endpoint telemetry associated with the same user, endpoint, or process lineage.
+
+Before production use, the detection would also require broader validation against positive, negative, repeated-command, formatting-variation, and boundary test cases.
