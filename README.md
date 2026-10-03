@@ -227,7 +227,7 @@ This exercise reinforced that detection logic should be validated against actual
 Earlier cases document the progression that led to the featured investigation:
 
 - **[Case 001 - PowerShell Discovery](investigations/case-001-powershell-discovery.md)** - Initial discovery investigation and process analysis.
-- **Case 002 - Discovery and Supporting Telemetry Correlation** - Deeper process ancestry and supporting-telemetry correlation.
+- **[Case 002 - Discovery and Supporting Telemetry Correlation](investigations/case-002-discovery-telemetry-correlation.md)** - Deeper process ancestry and supporting-telemetry correlation.
 - **[Case 003 - Registry Run Key Persistence](investigations/case-003-registry-run-key-persistence.md)** - Atomic Red Team persistence investigation, endpoint validation, remediation, and verification.
 
 These cases show progression from basic process investigation toward multi-source telemetry correlation and a more complete incident-handling workflow.
