@@ -22,6 +22,11 @@ The persistence artifact was subsequently validated directly on the endpoint, re
 - Atomic technique: T1547.001 – Registry Run Keys / Startup Folder
 - Atomic test: Test 9 – SystemBC Malware-as-a-Service Registry
 
+### Controlled Simulation
+
+![Atomic Red Team T1547.001 execution](../screenshots/01-atomic-red-team-execution.png)
+
+*Atomic Red Team T1547.001 Test 9 executed on SOC-WIN11 to generate controlled registry persistence activity.*
 ---
 
 ## Investigation Approach
@@ -100,6 +105,9 @@ The event showed:
 
 Because Windows Run keys can automatically execute configured programs when a user logs on, this modification represented a persistence mechanism.
 
+![Sysmon Event ID 13 registry persistence evidence](../screenshots/02-sysmon13-registry-persistence.png)
+
+*Sysmon Event ID 13 showing PowerShell modifying the current user's Run key, mapped to T1547.001.*
 ---
 
 ## PowerShell Script Block Correlation
@@ -120,6 +128,9 @@ The configured value was:
 
 This provided an additional telemetry source confirming the behavior observed in Sysmon Event ID 13.
 
+![PowerShell Event ID 4104 persistence script](../screenshots/03-powershell-4104-scriptblock.png)
+
+*PowerShell Event ID 4104 exposed the script-block content used to create the Run-key persistence value.*
 ---
 
 ## Evidence Correlation
@@ -184,7 +195,9 @@ The endpoint returned the `socks5_powershell` value with:
 `powershell.exe -windowstyle hidden -ExecutionPolicy Bypass -File`
 
 This confirmed that the registry value identified through Sentinel telemetry remained present on the endpoint.
+![Endpoint persistence validation](../screenshots/04-endpoint-persistence-validation.png)
 
+*Direct endpoint validation confirmed that the socks5_powershell Run-key value remained present after the simulated activity.*
 ---
 
 ## Remediation
@@ -206,7 +219,9 @@ Get-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Na
 PowerShell reported that the `socks5_powershell` property did not exist at the Run-key path.
 
 This verified that the persistence artifact had been successfully removed.
+![Persistence remediation verification](../screenshots/05-remediation-verification.png)
 
+*Atomic Red Team cleanup was followed by an independent registry query confirming removal of the persistence artifact.*
 ---
 
 ## MITRE ATT&CK Mapping
